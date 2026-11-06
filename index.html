@@ -294,16 +294,19 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
      20 bytes: 01 14 01 .. B3 = assist level?, B12 = speed limit km/h?
      Last byte assumed XOR of all previous bytes (shown as controlegetal). */
   const xorOk = b => { let x = 0; for (let i = 0; i < b.length - 1; i++) x ^= b[i]; return x === b[b.length - 1]; };
+  // Checksum confirmed on the bike (XOR of all previous bytes): frames that fail it are corrupted and ignored.
+  const isJN = b => (b.length === 14 && b[0] === 0x02 && b[1] === 0x0E) || (b.length === 20 && b[0] === 0x01 && b[1] === 0x14);
+  let jnSeen = false;
+  const good = { C2D: 0, D2C: 0 }, bad = { C2D: 0, D2C: 0 };
   function decodeJN(f, t) {
     const b = f.b;
-    if (b.length === 14 && b[0] === 0x02 && b[1] === 0x0E) {
+    if (!isJN(b) || !xorOk(b)) return t;
+    if (b.length === 14) {
       const period = (b[8] << 8) | b[9];
-      return Object.assign({}, t, { proto: 'Jinghui', speed: periodToKmh(period, cfg.wheel), speedT: f.t, period, csOk: xorOk(b) });
+      return Object.assign({}, t, { proto: 'Jinghui', speed: periodToKmh(period, cfg.wheel), speedT: f.t, period, csOk: true });
     }
-    if (b.length === 20 && b[0] === 0x01 && b[1] === 0x14) {
-      return Object.assign({}, t, { proto: 'Jinghui', pas: b[3], limit: b[12], cs2Ok: xorOk(b) });
-    }
-    return t;
+    // PAS byte not found yet (B3 is not it): left empty until confirmed
+    return Object.assign({}, t, { proto: 'Jinghui', limit: b[12], cs2Ok: true });
   }
 
   function decodeCustom(f, t) {
@@ -325,15 +328,20 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
 
   function onFrame(f) {
     lastFrameMs = f.t;
-    const key = f.dir + '/' + f.b.length;
+    const valid = isJN(f.b) && xorOk(f.b);
+    if (valid) { jnSeen = true; good[f.dir]++; } else if (jnSeen) bad[f.dir]++;
+    f.bad = jnSeen && !valid;
+    const key = f.bad ? f.dir + '/verminkt' : f.dir + '/' + f.b.length;
     let s = streams.get(key);
-    if (!s) { s = { dir: f.dir, len: f.b.length, count: 0, last: new Array(f.b.length).fill(0), changes: new Array(f.b.length).fill(0), changedAt: new Array(f.b.length).fill(0) }; streams.set(key, s); }
-    for (let i = 0; i < s.len; i++) {
-      if (s.count > 0 && f.b[i] !== s.last[i]) { s.changes[i]++; s.changedAt[i] = f.t; }
-      s.last[i] = f.b[i];
+    if (!s) { s = { dir: f.dir, len: f.b.length, garbled: f.bad, count: 0, last: new Array(f.b.length).fill(0), changes: new Array(f.b.length).fill(0), changedAt: new Array(f.b.length).fill(0) }; streams.set(key, s); }
+    if (!s.garbled) {
+      for (let i = 0; i < s.len; i++) {
+        if (s.count > 0 && f.b[i] !== s.last[i]) { s.changes[i]++; s.changedAt[i] = f.t; }
+        s.last[i] = f.b[i];
+      }
     }
     s.count++;
-    log.push(f); if (log.length > 500) log.shift();
+    log.push(f); if (log.length > 3000) log.shift();
 
     const before = tel;
     tel = cfg.decoder === 'CUSTOM' ? decodeCustom(f, tel) : decodeJN(f, decodeKT(f, tel));
@@ -505,7 +513,12 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
     const box = $('streams');
     if (!streams.size) { box.innerHTML = '<div class="empty">Nog geen berichten ontvangen.</div>'; $('log').textContent = '–'; return; }
     let html = '';
+    if (jnSeen) {
+      const pct = d => { const n = good[d] + bad[d]; return n ? Math.round(bad[d] * 100 / n) + '%' : '–'; };
+      html += '<p class="help">Verminkte berichten (signaalkwaliteit): controller → display ' + pct('C2D') + ', display → controller ' + pct('D2C') + '. Onder de 1% is goed.</p>';
+    }
     for (const s of streams.values()) {
+      if (s.garbled) { html += '<div class="stream"><div class="title">' + dirName(s.dir) + ', verminkt: ' + s.count + ' berichten genegeerd</div></div>'; continue; }
       html += '<div class="stream"><div class="title">' + dirName(s.dir) + ', ' + s.len + ' bytes, ' + s.count + ' berichten</div><div class="bytes">';
       for (let i = 0; i < s.len; i++) {
         const hot = s.changedAt[i] && now - s.changedAt[i] < 1500;
@@ -514,7 +527,7 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
       html += '</div></div>';
     }
     box.innerHTML = html;
-    $('log').textContent = log.slice(-30).reverse().map(f => (f.dir === 'C2D' ? 'C→D ' : 'D→C ') + String(f.b.length).padStart(2) + ': ' + hex(f.b)).join('\n');
+    $('log').textContent = log.slice(-30).reverse().map(f => (f.bad ? '✗ ' : '  ') + (f.dir === 'C2D' ? 'C→D ' : 'D→C ') + String(f.b.length).padStart(2) + ': ' + hex(f.b)).join('\n');
   }
 
   setInterval(() => {
@@ -547,9 +560,9 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
   $('phoneDemo').addEventListener('change', e => setPhoneDemo(e.target.checked));
   document.querySelectorAll('[data-cmd]').forEach(b => b.addEventListener('click', () => send(b.dataset.cmd)));
 
-  $('clearData').addEventListener('click', () => { streams.clear(); log.length = 0; renderData(); });
+  $('clearData').addEventListener('click', () => { streams.clear(); log.length = 0; good.C2D = good.D2C = bad.C2D = bad.D2C = 0; renderData(); });
   $('copyLog').addEventListener('click', async () => {
-    const txt = log.map(f => time(f.t) + ' ' + f.dir + ' ' + f.b.length + ': ' + hex(f.b)).join('\n');
+    const txt = log.map(f => time(f.t) + ' ' + f.dir + (f.bad ? ' VERMINKT ' : ' ') + f.b.length + ': ' + hex(f.b)).join('\n');
     if (!txt) { toast('Nog niets om te kopiëren'); return; }
     try { await navigator.clipboard.writeText(txt); toast(log.length + ' berichten gekopieerd'); }
     catch { $('logTxt').value = txt; $('logDlg').showModal(); $('logTxt').select(); }
