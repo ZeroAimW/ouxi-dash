@@ -192,7 +192,8 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
     </div>
 
     <h2>ESP32</h2>
-    <div class="status" id="espStatus">Geen status ontvangen</div>
+    <div class="status" id="btDiag">Bluetooth-check…</div>
+    <div class="status" id="espStatus" style="margin-top:6px">Geen status ontvangen</div>
     <h3>Baudrate</h3>
     <div class="actions">
       <button class="btn small" data-cmd="BAUD 1200">1200</button>
@@ -215,7 +216,7 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
 
     <h2>Decoder</h2>
     <div class="actions">
-      <button class="btn small" data-dec="KT" aria-pressed="true">KT / UART2</button>
+      <button class="btn small" data-dec="AUTO" aria-pressed="true">Automatisch (Jinghui + KT)</button>
       <button class="btn small" data-dec="CUSTOM" aria-pressed="false">Eigen indeling</button>
     </div>
     <div class="custom" id="customBox" hidden>
@@ -260,8 +261,9 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
     get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
   };
-  const defaults = { decoder:'KT', wheel:1.96, ctrlDir:'C2D', ctrlLen:12, speedHi:3, speedLo:4, speedMode:'PERIOD_MS', battIdx:1, battMax:16, dispDir:'D2C', dispLen:13, pasIdx:1, pasMask:7 };
+  const defaults = { decoder:'AUTO', wheel:1.96, ctrlDir:'C2D', ctrlLen:12, speedHi:3, speedLo:4, speedMode:'PERIOD_MS', battIdx:1, battMax:16, dispDir:'D2C', dispLen:13, pasIdx:1, pasMask:7 };
   let cfg = Object.assign({}, defaults, store.get('ouxi-cfg', {}));
+  if (cfg.decoder !== 'CUSTOM') cfg.decoder = 'AUTO';
   let odoKm = Number(store.get('ouxi-odo', 0)) || 0;
   let tripKm = 0, lastSavedOdo = odoKm, lastSpeedT = 0;
 
@@ -287,6 +289,23 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
     if (f.dir === 'D2C' && b.length === 13) return Object.assign({}, t, { pas: b[1] & 7, lights: (b[1] & 0x80) !== 0 });
     return t;
   }
+  /* Jinghui / 5S-style frames, seen on the Ouxi V8 (LCD-V8-250-M5), 9600 baud:
+     14 bytes: 02 0E 01 .. B8-B9 = wheel rotation time in ms (to be confirmed)
+     20 bytes: 01 14 01 .. B3 = assist level?, B12 = speed limit km/h?
+     Last byte assumed XOR of all previous bytes (shown as controlegetal). */
+  const xorOk = b => { let x = 0; for (let i = 0; i < b.length - 1; i++) x ^= b[i]; return x === b[b.length - 1]; };
+  function decodeJN(f, t) {
+    const b = f.b;
+    if (b.length === 14 && b[0] === 0x02 && b[1] === 0x0E) {
+      const period = (b[8] << 8) | b[9];
+      return Object.assign({}, t, { proto: 'Jinghui', speed: periodToKmh(period, cfg.wheel), speedT: f.t, period, csOk: xorOk(b) });
+    }
+    if (b.length === 20 && b[0] === 0x01 && b[1] === 0x14) {
+      return Object.assign({}, t, { proto: 'Jinghui', pas: b[3], limit: b[12], cs2Ok: xorOk(b) });
+    }
+    return t;
+  }
+
   function decodeCustom(f, t) {
     const b = f.b, n = b.length, c = cfg; let r = t;
     if (f.dir === c.ctrlDir && n === c.ctrlLen) {
@@ -317,7 +336,7 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
     log.push(f); if (log.length > 500) log.shift();
 
     const before = tel;
-    tel = cfg.decoder === 'CUSTOM' ? decodeCustom(f, tel) : decodeKT(f, tel);
+    tel = cfg.decoder === 'CUSTOM' ? decodeCustom(f, tel) : decodeJN(f, decodeKT(f, tel));
     if (tel.speedT && tel.speedT !== before.speedT) integrate(tel.speed, tel.speedT);
     scheduleRender();
   }
@@ -376,9 +395,12 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
 
   async function connect() {
     if (!('bluetooth' in navigator)) {
-      showBtNotice('Deze browser heeft geen Bluetooth. Open deze pagina in Chrome op Android (niet in de Claude-app). Op een iPhone werkt dit niet. De telefoon-demo werkt wel overal.');
+      setConn('off', 'Geen Bluetooth in deze browser');
+      toast('Geen Bluetooth in deze browser. Gebruik Chrome op Android.');
+      showBtNotice('Deze browser heeft geen Bluetooth. Open deze pagina in Chrome op Android (niet in de Claude-app, niet via een link in WhatsApp of Discord, niet in Samsung Internet). Op een iPhone werkt dit niet. De telefoon-demo werkt wel overal.');
       return;
     }
+    setConn('busy', 'Apparatenlijst openen…');
     try {
       device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }, { namePrefix: 'Ouxi' }], optionalServices: [SVC] });
       device.addEventListener('gattserverdisconnected', onDisconnected);
@@ -386,7 +408,7 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
       await openGatt();
       $('btNotice').hidden = true;
     } catch (e) {
-      if (e.name === 'NotFoundError') setConn('off', 'Geen apparaat gekozen');
+      if (e.name === 'NotFoundError') { setConn('off', 'Geen apparaat gekozen'); toast(/adapter|bluetooth/i.test(e.message) ? 'Bluetooth staat uit of Chrome mag geen apparaten in de buurt zoeken' : 'Geen apparaat gekozen'); }
       else if (e.name === 'SecurityError') { setConn('off', 'Bluetooth geblokkeerd'); showBtNotice('Bluetooth is geblokkeerd in deze weergave. Open de link van deze pagina in Chrome op Android.'); }
       else { setConn('off', 'Verbinden mislukt'); toast(e.message || String(e)); }
     }
@@ -470,7 +492,8 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
 
     const err = $('err');
     if (tel.error) { err.hidden = false; err.textContent = 'Foutcode ' + tel.error + ' van de controller'; } else err.hidden = true;
-    $('tech').textContent = 'Wielomlooptijd ' + (tel.period ?? '–') + ' ms · accu ruw ' + (tel.battRaw ?? '–') + ' · controlegetal ' + (tel.csOk == null ? '–' : tel.csOk ? 'klopt' : 'klopt niet');
+    const cs = v => v == null ? '–' : v ? 'klopt' : 'klopt niet';
+    $('tech').textContent = 'Protocol ' + (tel.proto || (tel.battRaw != null ? 'KT' : '–')) + ' · wielomlooptijd ' + (tel.period ?? '–') + ' ms · limiet ' + (tel.limit != null ? tel.limit + ' km/u' : '–') + ' · controlegetal ' + cs(tel.csOk) + (tel.cs2Ok != null ? ' / ' + cs(tel.cs2Ok) : '');
   }
 
   function hex(b) { return Array.from(b, v => v.toString(16).toUpperCase().padStart(2, '0')).join(' '); }
@@ -555,7 +578,17 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
     odoKm = v; lastSavedOdo = v; store.set('ouxi-odo', v); renderRide(); toast('Kilometerstand opgeslagen');
   });
 
-  if (!('bluetooth' in navigator)) showBtNotice('Bluetooth werkt niet in deze weergave. Open de link van deze pagina in Chrome op Android. De telefoon-demo onder Instellingen werkt wel.');
+  if (!('bluetooth' in navigator)) {
+    showBtNotice('Bluetooth werkt niet in deze weergave. Open de link van deze pagina in Chrome op Android. De telefoon-demo onder Instellingen werkt wel.');
+    setConn('off', 'Geen Bluetooth in deze browser');
+    $('btDiag').textContent = 'Web Bluetooth: niet beschikbaar in deze browser';
+  } else if (navigator.bluetooth.getAvailability) {
+    navigator.bluetooth.getAvailability()
+      .then(ok => { $('btDiag').textContent = 'Web Bluetooth: aanwezig · Bluetooth-adapter: ' + (ok ? 'aan' : 'uit of geen toestemming'); })
+      .catch(() => { $('btDiag').textContent = 'Web Bluetooth: aanwezig · adapter onbekend'; });
+  } else {
+    $('btDiag').textContent = 'Web Bluetooth: aanwezig';
+  }
   fillSettings();
   showView();
   renderRide();
