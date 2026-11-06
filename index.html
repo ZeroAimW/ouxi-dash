@@ -81,6 +81,7 @@ main{padding:0 16px calc(84px + env(safe-area-inset-bottom,0px));max-width:560px
 .err{margin-top:12px;padding:10px 12px;border-radius:10px;background:var(--red);color:#fff;font-weight:700}
 .err[hidden]{display:none}
 .tech{margin-top:12px;font-size:13px;color:var(--muted)}
+.stale .val,.stale .pips,#speed.stale{opacity:.35}
 
 /* data view */
 h2{font-family:var(--num);font-weight:800;font-size:30px;margin:20px 0 6px;letter-spacing:.01em}
@@ -139,8 +140,8 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
     <div class="scaleLbl" aria-hidden="true"><span>0</span><span>25</span><span>30</span></div>
 
     <div class="grid">
-      <div class="cell">
-        <div class="lbl">Ondersteuning</div>
+      <div class="cell" id="pasCell">
+        <div class="lbl" id="pasLbl">Ondersteuning</div>
         <div class="val" id="pas">–</div>
         <div class="pips" id="pips"><i></i><i></i><i></i><i></i><i></i></div>
       </div>
@@ -262,7 +263,7 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
   const CMD = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
   const DATA = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
   const $ = id => document.getElementById(id);
-  const VERSION = 'v0.8 (6 nov 2026)';
+  const VERSION = 'v0.10 (6 nov 2026)';
 
   /* ---------- storage (per browser) ---------- */
   const store = {
@@ -311,10 +312,11 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
     if (!isJN(b) || !xorOk(b)) return t;
     if (b.length === 14) {
       const period = (b[8] << 8) | b[9];
-      return Object.assign({}, t, { proto: 'Jinghui', speed: periodToKmh(period, cfg.wheel), speedT: f.t, period, brake: (b[4] & 0x20) !== 0, csOk: true });
+      return Object.assign({}, t, { proto: 'Jinghui', speed: periodToKmh(period, cfg.wheel), speedT: f.t, period, brake: (b[4] & 0x20) !== 0, c2dT: f.t, csOk: true });
     }
-    // PAS confirmed on the bike: B4 = PAS level × 3 (0, 3, 6, 9, 12, 15 for PAS 0–5)
-    return Object.assign({}, t, { proto: 'Jinghui', pas: Math.max(0, Math.min(5, Math.round(b[4] / 3))), pasRaw: b[4], limit: b[12], cs2Ok: true });
+    // PAS confirmed on the bike: B4 = PAS level × 3 (0, 3, 6, 9, 12, 15 for PAS 0–5); other values keep the previous PAS
+    const pasOk = b[4] % 3 === 0 && b[4] <= 15;
+    return Object.assign({}, t, { proto: 'Jinghui', pas: pasOk ? b[4] / 3 : t.pas, pasRaw: b[4], limit: b[12], d2cT: f.t, cs2Ok: true });
   }
 
   function decodeCustom(f, t) {
@@ -488,6 +490,13 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
   function scheduleRender() { if (!renderQueued) { renderQueued = true; requestAnimationFrame(() => { renderQueued = false; renderRide(); }); } }
 
   function renderRide() {
+    // Stale = no valid (checksum-OK) message for 1.5 s, e.g. interference while the motor runs: grey out, keep last value
+    const nowR = Date.now();
+    const pasStale = !!tel.d2cT && nowR - tel.d2cT > 1500;
+    const spdStale = !!tel.c2dT && nowR - tel.c2dT > 1500;
+    $('pasCell').classList.toggle('stale', pasStale);
+    $('pasLbl').textContent = pasStale ? 'Ondersteuning (storing, laatste waarde)' : 'Ondersteuning';
+    $('speed').classList.toggle('stale', spdStale);
     const sp = tel.speed;
     $('speed').textContent = sp == null ? '0.0' : sp.toFixed(1);
     const fill = $('speedFill');
@@ -544,6 +553,7 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
     n.hidden = !stale;
     if (stale && lastFrameMs) n.textContent = 'Geen data van de fiets in de laatste 3 seconden.';
     if (currentView === 'data') renderData();
+    if (currentView === 'rijden') renderRide();
   }, 300);
 
   /* ---------- views (hash routing) ---------- */
