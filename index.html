@@ -1,0 +1,565 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ouxi Dash</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#E8EBE4; --surface:#F6F7F2; --ink:#15181A; --muted:#5B625E; --line:#C8CDC3;
+  --amber:#C98A00; --green:#257F4C; --red:#BD3428; --blue:#2C58C4; --track:#D6DAD1;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  --num:"Big Shoulders Display","Arial Narrow","Roboto Condensed",sans-serif;
+  --txt:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#131618; --surface:#1C2023; --ink:#ECEFE9; --muted:#9AA29C; --line:#333A3D;
+    --amber:#F0B42E; --green:#4CC285; --red:#F26B5B; --blue:#86A6FF; --track:#2A3033;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#131618; --surface:#1C2023; --ink:#ECEFE9; --muted:#9AA29C; --line:#333A3D;
+  --amber:#F0B42E; --green:#4CC285; --red:#F26B5B; --blue:#86A6FF; --track:#2A3033;
+  color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:inherit}
+html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;min-height:100%;background:var(--bg);color:var(--ink);font-family:var(--txt);font-size:16px;line-height:1.45;-webkit-tap-highlight-color:transparent}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--surface)}
+button{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+
+/* status bar */
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface);border-bottom:1px solid var(--line)}
+.dot{width:12px;height:12px;border-radius:50%;background:var(--red);flex:none}
+.dot.on{background:var(--green)} .dot.busy{background:var(--amber)}
+#connText{flex:1;font-size:14px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.btn{border:1.5px solid var(--ink);background:transparent;border-radius:999px;padding:7px 16px;font-weight:700;font-size:15px;cursor:pointer}
+.btn.primary{background:var(--ink);color:var(--surface)}
+.btn.small{padding:5px 12px;font-size:14px}
+.btn[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
+
+main{padding:0 16px calc(84px + env(safe-area-inset-bottom,0px));max-width:560px;margin:0 auto}
+.view{display:none} .view.active{display:block}
+
+/* ride view */
+.notice{margin:14px 0 0;padding:10px 12px;border-radius:10px;background:var(--surface);border-left:4px solid var(--amber);font-size:15px}
+.notice[hidden]{display:none}
+.speed{display:flex;align-items:baseline;justify-content:center;gap:8px;margin-top:18px}
+#speed{font-family:var(--num);font-weight:800;font-size:clamp(120px,40vw,200px);line-height:.85;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.unit{font-family:var(--num);font-weight:600;font-size:28px;color:var(--muted)}
+.scale{position:relative;height:14px;margin:18px 4px 4px;background:var(--track);border-radius:7px;overflow:visible}
+#speedFill{position:absolute;inset:0 auto 0 0;width:0;background:var(--ink);border-radius:7px;transition:width .2s linear}
+#speedFill.over{background:var(--red)}
+.limit{position:absolute;top:-6px;bottom:-6px;width:3px;background:var(--red);left:calc(25 / 30 * 100%)}
+.scaleLbl{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin:0 2px}
+.scaleLbl span:nth-child(2){position:relative;left:calc(25 / 30 * 100% - 50%)}
+
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:22px}
+.cell{background:var(--surface);border-radius:14px;padding:12px 14px}
+.cell.wide{grid-column:1 / -1}
+.lbl{font-size:14px;color:var(--muted)}
+.val{font-family:var(--num);font-weight:800;font-size:44px;line-height:1;margin-top:4px;font-variant-numeric:tabular-nums}
+.val small{font-size:22px;font-weight:600;color:var(--muted);margin-left:4px}
+.pips{display:flex;gap:6px;margin-top:10px}
+.pips i{flex:1;height:22px;border-radius:4px;background:var(--track)}
+.pips i.on{background:var(--amber)}
+.batt{display:flex;gap:5px;margin-top:10px;align-items:center}
+.batt i{flex:1;height:22px;border-radius:3px;background:var(--track)}
+.batt i.on{background:var(--green)}
+.batt.low i.on{background:var(--red)}
+.batt::after{content:"";width:5px;height:10px;background:var(--track);border-radius:0 2px 2px 0}
+.rowline{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.err{margin-top:12px;padding:10px 12px;border-radius:10px;background:var(--red);color:#fff;font-weight:700}
+.err[hidden]{display:none}
+.tech{margin-top:12px;font-size:13px;color:var(--muted)}
+
+/* data view */
+h2{font-family:var(--num);font-weight:800;font-size:30px;margin:20px 0 6px;letter-spacing:.01em}
+h3{font-size:16px;margin:18px 0 8px}
+p.help{margin:0 0 10px;font-size:14px;color:var(--muted);max-width:60ch}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.stream{background:var(--surface);border-radius:14px;padding:12px;margin-bottom:12px}
+.stream .title{font-weight:700;font-size:15px}
+.bytes{display:flex;gap:4px;overflow-x:auto;padding:8px 0 2px}
+.byte{flex:none;width:46px;text-align:center;border-radius:8px;background:var(--bg);padding:4px 0;font-variant-numeric:tabular-nums}
+.byte.hot{background:var(--amber);color:#15181A}
+.byte .i{font-size:11px;color:var(--muted)} .byte.hot .i{color:#15181A}
+.byte .h{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-weight:700;font-size:16px}
+.byte .d,.byte .c{font-size:11px}
+.log{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;line-height:1.5;background:var(--surface);border-radius:14px;padding:10px 12px;overflow-x:auto;white-space:pre}
+.empty{padding:18px;border:1.5px dashed var(--line);border-radius:14px;color:var(--muted);font-size:15px}
+
+/* settings */
+.field{display:flex;flex-direction:column;gap:4px;margin:10px 0}
+.field label{font-size:14px;color:var(--muted)}
+.field input,.field select{font:inherit;color:var(--ink);background:var(--surface);border:1.5px solid var(--line);border-radius:10px;padding:9px 11px}
+.inline{display:flex;gap:8px;align-items:flex-end}
+.inline .field{flex:1}
+.switch{display:flex;align-items:center;gap:10px;margin:10px 0;font-size:16px}
+.switch input{width:22px;height:22px;accent-color:var(--ink)}
+.status{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;color:var(--muted);background:var(--surface);border-radius:10px;padding:8px 10px;overflow-x:auto;white-space:nowrap}
+.custom[hidden]{display:none}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}
+
+/* bottom nav */
+nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:5;display:flex;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+nav.tabs a{flex:1;text-align:center;padding:14px 0 16px;color:var(--muted);text-decoration:none;font-weight:700;font-size:15px;border-top:3px solid transparent}
+nav.tabs a[aria-current="page"]{color:var(--ink);border-top-color:var(--ink)}
+
+.toast{position:fixed;left:50%;bottom:calc(80px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--surface);padding:10px 16px;border-radius:999px;font-size:14px;z-index:20;max-width:90vw;text-align:center}
+.toast[hidden]{display:none}
+dialog{border:none;border-radius:16px;background:var(--surface);color:var(--ink);max-width:92vw;width:520px;padding:16px}
+dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospace;font-size:12px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:10px}
+@media (prefers-reduced-motion: reduce){#speedFill{transition:none}}
+</style>
+</head>
+<body>
+<header class="bar">
+  <span class="dot" id="dot" aria-hidden="true"></span>
+  <span id="connText">Niet verbonden</span>
+  <button class="btn primary" id="connBtn">Verbinden</button>
+</header>
+
+<main>
+  <!-- RIJDEN -->
+  <section class="view" id="view-rijden" aria-label="Rijden">
+    <p class="notice" id="btNotice" hidden></p>
+    <p class="notice" id="staleNotice">Nog geen data. Tik op Verbinden, of zet onder Instellingen de demo aan.</p>
+    <div class="speed"><span id="speed">0.0</span><span class="unit">km/u</span></div>
+    <div class="scale" aria-hidden="true"><div id="speedFill"></div><div class="limit"></div></div>
+    <div class="scaleLbl" aria-hidden="true"><span>0</span><span>25</span><span>30</span></div>
+
+    <div class="grid">
+      <div class="cell">
+        <div class="lbl">Ondersteuning</div>
+        <div class="val" id="pas">–</div>
+        <div class="pips" id="pips"><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+      <div class="cell">
+        <div class="lbl">Accu</div>
+        <div class="val" id="batt">–</div>
+        <div class="batt" id="battBars"><i></i><i></i><i></i><i></i></div>
+      </div>
+      <div class="cell">
+        <div class="lbl">Vermogen</div>
+        <div class="val" id="power">–</div>
+      </div>
+      <div class="cell">
+        <div class="lbl">Dagteller</div>
+        <div class="val" id="trip">0.00<small>km</small></div>
+      </div>
+      <div class="cell wide">
+        <div class="rowline">
+          <div><div class="lbl">Kilometerstand</div><div class="val" id="odo">0.0<small>km</small></div></div>
+          <button class="btn small" id="resetTrip">Dagteller op 0</button>
+        </div>
+      </div>
+    </div>
+    <div class="err" id="err" hidden></div>
+    <div class="tech" id="tech">Wielomlooptijd – · accu ruw – · controlegetal –</div>
+  </section>
+
+  <!-- DATA -->
+  <section class="view" id="view-data" aria-label="Data">
+    <h2>Ruwe data</h2>
+    <p class="help">Elke kaart is één soort bericht. Oranje bytes zijn net veranderd. Verander één ding aan de fiets (PAS, wiel draaien, licht) en kijk welke byte meebeweegt.</p>
+    <div class="actions">
+      <button class="btn small" id="copyLog">Log kopiëren</button>
+      <button class="btn small" id="clearData">Wissen</button>
+    </div>
+    <div id="streams"><div class="empty">Nog geen berichten ontvangen.</div></div>
+    <h3>Laatste berichten</h3>
+    <div class="log" id="log">–</div>
+  </section>
+
+  <!-- INSTELLINGEN -->
+  <section class="view" id="view-instellingen" aria-label="Instellingen">
+    <h2>Testen</h2>
+    <p class="help">Telefoon-demo maakt nepdata in deze pagina (geen ESP32 nodig). ESP32-demo laat de ESP32 nepdata sturen via Bluetooth.</p>
+    <label class="switch"><input type="checkbox" id="phoneDemo"> Telefoon-demo</label>
+    <div class="actions">
+      <button class="btn small" data-cmd="DEMO 1">ESP32-demo aan</button>
+      <button class="btn small" data-cmd="DEMO 0">ESP32-demo uit</button>
+    </div>
+
+    <h2>ESP32</h2>
+    <div class="status" id="espStatus">Geen status ontvangen</div>
+    <h3>Baudrate</h3>
+    <div class="actions">
+      <button class="btn small" data-cmd="BAUD 1200">1200</button>
+      <button class="btn small" data-cmd="BAUD 2400">2400</button>
+      <button class="btn small" data-cmd="BAUD 4800">4800</button>
+      <button class="btn small" data-cmd="BAUD 9600">9600</button>
+      <button class="btn small" data-cmd="BAUD 19200">19200</button>
+    </div>
+    <div class="actions">
+      <button class="btn small" data-cmd="INV 0">Signaal normaal</button>
+      <button class="btn small" data-cmd="INV 1">Signaal omgekeerd</button>
+    </div>
+
+    <h2>Fiets</h2>
+    <div class="field"><label for="wheel">Wielomtrek (m)</label><input id="wheel" type="number" step="0.01" inputmode="decimal"></div>
+    <div class="inline">
+      <div class="field"><label for="odoIn">Kilometerstand van het display (km)</label><input id="odoIn" type="number" step="0.1" inputmode="decimal"></div>
+      <button class="btn small" id="odoSave" style="margin-bottom:12px">Opslaan</button>
+    </div>
+
+    <h2>Decoder</h2>
+    <div class="actions">
+      <button class="btn small" data-dec="KT" aria-pressed="true">KT / UART2</button>
+      <button class="btn small" data-dec="CUSTOM" aria-pressed="false">Eigen indeling</button>
+    </div>
+    <div class="custom" id="customBox" hidden>
+      <h3>Controllerbericht (snelheid, accu)</h3>
+      <div class="two">
+        <div class="field"><label for="ctrlDir">Richting</label><select id="ctrlDir"><option value="C2D">controller → display</option><option value="D2C">display → controller</option></select></div>
+        <div class="field"><label for="ctrlLen">Lengte (bytes)</label><input id="ctrlLen" type="number"></div>
+        <div class="field"><label for="speedHi">Snelheid hoge byte (−1 = geen)</label><input id="speedHi" type="number"></div>
+        <div class="field"><label for="speedLo">Snelheid lage byte</label><input id="speedLo" type="number"></div>
+        <div class="field"><label for="speedMode">Snelheid is</label><select id="speedMode"><option value="PERIOD_MS">wielomlooptijd (ms)</option><option value="KMH_X10">km/u × 10</option></select></div>
+        <div class="field"><label for="battIdx">Accu byte</label><input id="battIdx" type="number"></div>
+        <div class="field"><label for="battMax">Accu waarde bij 100 %</label><input id="battMax" type="number"></div>
+      </div>
+      <h3>Displaybericht (ondersteuning)</h3>
+      <div class="two">
+        <div class="field"><label for="dispDir">Richting</label><select id="dispDir"><option value="C2D">controller → display</option><option value="D2C">display → controller</option></select></div>
+        <div class="field"><label for="dispLen">Lengte (bytes)</label><input id="dispLen" type="number"></div>
+        <div class="field"><label for="pasIdx">PAS byte</label><input id="pasIdx" type="number"></div>
+        <div class="field"><label for="pasMask">PAS masker (7 = 0x07)</label><input id="pasMask" type="number"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<nav class="tabs" aria-label="Schermen">
+  <a href="#rijden" data-view="rijden">Rijden</a>
+  <a href="#data" data-view="data">Data</a>
+  <a href="#instellingen" data-view="instellingen">Instellingen</a>
+</nav>
+<div class="toast" id="toast" hidden></div>
+<dialog id="logDlg"><p style="margin-top:0">Kopiëren lukte niet automatisch. Selecteer de tekst en kopieer hem zelf.</p><textarea id="logTxt" readonly></textarea><div class="actions"><button class="btn small" id="logClose">Sluiten</button></div></dialog>
+
+<script>
+(() => {
+  const SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+  const CMD = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+  const DATA = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+  const $ = id => document.getElementById(id);
+
+  /* ---------- storage (per browser) ---------- */
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+  };
+  const defaults = { decoder:'KT', wheel:1.96, ctrlDir:'C2D', ctrlLen:12, speedHi:3, speedLo:4, speedMode:'PERIOD_MS', battIdx:1, battMax:16, dispDir:'D2C', dispLen:13, pasIdx:1, pasMask:7 };
+  let cfg = Object.assign({}, defaults, store.get('ouxi-cfg', {}));
+  let odoKm = Number(store.get('ouxi-odo', 0)) || 0;
+  let tripKm = 0, lastSavedOdo = odoKm, lastSpeedT = 0;
+
+  /* ---------- state ---------- */
+  let tel = {};             // telemetry
+  let lastFrameMs = 0;
+  let espStatus = '';
+  let phoneDemo = false, demoTimer = null;
+  const streams = new Map();
+  const log = [];
+
+  /* ---------- decoding ---------- */
+  const periodToKmh = (p, c) => (p <= 0 || p >= 3000) ? 0 : c / (p / 1000) * 3.6;
+  const ktBatt = v => ({16:100,12:75,8:50,4:25,0:0,1:0,2:0,3:0})[v] ?? Math.max(0, Math.min(100, Math.round(v * 100 / 16)));
+
+  function decodeKT(f, t) {
+    const b = f.b;
+    if (f.dir === 'C2D' && b.length === 12 && b[0] === 0x41) {
+      let x = 0; for (let i = 1; i < 12; i++) if (i !== 6) x ^= b[i];
+      const period = (b[3] << 8) | b[4];
+      return Object.assign({}, t, { speed: periodToKmh(period, cfg.wheel), speedT: f.t, period, battRaw: b[1], batt: ktBatt(b[1]), error: b[5], power: b[8] * 13, csOk: x === b[6] });
+    }
+    if (f.dir === 'D2C' && b.length === 13) return Object.assign({}, t, { pas: b[1] & 7, lights: (b[1] & 0x80) !== 0 });
+    return t;
+  }
+  function decodeCustom(f, t) {
+    const b = f.b, n = b.length, c = cfg; let r = t;
+    if (f.dir === c.ctrlDir && n === c.ctrlLen) {
+      if (c.speedLo >= 0 && c.speedLo < n && c.speedHi < n) {
+        const v = c.speedHi < 0 ? b[c.speedLo] : (b[c.speedHi] << 8) | b[c.speedLo];
+        const kmh = c.speedMode === 'KMH_X10' ? v / 10 : periodToKmh(v, c.wheel);
+        r = Object.assign({}, r, { speed: kmh, speedT: f.t, period: v });
+      }
+      if (c.battIdx >= 0 && c.battIdx < n && c.battMax > 0) {
+        const raw = b[c.battIdx];
+        r = Object.assign({}, r, { battRaw: raw, batt: Math.max(0, Math.min(100, Math.round(raw * 100 / c.battMax))) });
+      }
+    }
+    if (f.dir === c.dispDir && n === c.dispLen && c.pasIdx >= 0 && c.pasIdx < n) r = Object.assign({}, r, { pas: b[c.pasIdx] & c.pasMask });
+    return r;
+  }
+
+  function onFrame(f) {
+    lastFrameMs = f.t;
+    const key = f.dir + '/' + f.b.length;
+    let s = streams.get(key);
+    if (!s) { s = { dir: f.dir, len: f.b.length, count: 0, last: new Array(f.b.length).fill(0), changes: new Array(f.b.length).fill(0), changedAt: new Array(f.b.length).fill(0) }; streams.set(key, s); }
+    for (let i = 0; i < s.len; i++) {
+      if (s.count > 0 && f.b[i] !== s.last[i]) { s.changes[i]++; s.changedAt[i] = f.t; }
+      s.last[i] = f.b[i];
+    }
+    s.count++;
+    log.push(f); if (log.length > 500) log.shift();
+
+    const before = tel;
+    tel = cfg.decoder === 'CUSTOM' ? decodeCustom(f, tel) : decodeKT(f, tel);
+    if (tel.speedT && tel.speedT !== before.speedT) integrate(tel.speed, tel.speedT);
+    scheduleRender();
+  }
+
+  function integrate(kmh, t) {
+    const demo = phoneDemo || /DEMO=1/.test(espStatus);
+    if (lastSpeedT > 0 && !demo) {
+      const dt = Math.min(Math.max((t - lastSpeedT) / 1000, 0), 2);
+      const km = kmh * dt / 3600;
+      odoKm += km; tripKm += km;
+      if (odoKm - lastSavedOdo > 0.05) { lastSavedOdo = odoKm; store.set('ouxi-odo', odoKm); }
+    }
+    lastSpeedT = t;
+  }
+
+  /* ---------- Bluetooth ---------- */
+  let device = null, cmdChar = null, wantConnected = false, writeChain = Promise.resolve();
+  const partial = {};
+
+  function handlePacket(dv) {
+    const p = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+    if (p.length < 2) return;
+    const type = p[0] & 0x7f, more = (p[0] & 0x80) !== 0;
+    const len = Math.min(p[1], p.length - 2);
+    (partial[type] = partial[type] || []).push(...p.slice(2, 2 + len));
+    if (more) return;
+    const data = Uint8Array.from(partial[type]); partial[type] = [];
+    const now = Date.now();
+    if (type === 1) onFrame({ dir: 'C2D', b: data, t: now });
+    else if (type === 2) onFrame({ dir: 'D2C', b: data, t: now });
+    else if (type === 0x10) { espStatus = new TextDecoder().decode(data); $('espStatus').textContent = espStatus; }
+  }
+
+  function setConn(state, text) {
+    const dot = $('dot');
+    dot.className = 'dot' + (state === 'on' ? ' on' : state === 'busy' ? ' busy' : '');
+    $('connText').textContent = text;
+    $('connBtn').textContent = (state === 'off') ? 'Verbinden' : 'Verbreken';
+    $('connBtn').classList.toggle('primary', state === 'off');
+  }
+
+  function showBtNotice(msg) { const n = $('btNotice'); n.textContent = msg; n.hidden = false; }
+
+  async function openGatt() {
+    setConn('busy', 'Verbinden met ' + (device.name || 'OuxiBridge') + '…');
+    const server = await device.gatt.connect();
+    const svc = await server.getPrimaryService(SVC);
+    const dataChar = await svc.getCharacteristic(DATA);
+    cmdChar = await svc.getCharacteristic(CMD);
+    dataChar.addEventListener('characteristicvaluechanged', e => handlePacket(e.target.value));
+    await dataChar.startNotifications();
+    setConn('on', 'Verbonden met ' + (device.name || 'OuxiBridge'));
+    keepAwake();
+    send('STATUS');
+  }
+
+  async function connect() {
+    if (!('bluetooth' in navigator)) {
+      showBtNotice('Deze browser heeft geen Bluetooth. Open deze pagina in Chrome op Android (niet in de Claude-app). Op een iPhone werkt dit niet. De telefoon-demo werkt wel overal.');
+      return;
+    }
+    try {
+      device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }, { namePrefix: 'Ouxi' }], optionalServices: [SVC] });
+      device.addEventListener('gattserverdisconnected', onDisconnected);
+      wantConnected = true;
+      await openGatt();
+      $('btNotice').hidden = true;
+    } catch (e) {
+      if (e.name === 'NotFoundError') setConn('off', 'Geen apparaat gekozen');
+      else if (e.name === 'SecurityError') { setConn('off', 'Bluetooth geblokkeerd'); showBtNotice('Bluetooth is geblokkeerd in deze weergave. Open de link van deze pagina in Chrome op Android.'); }
+      else { setConn('off', 'Verbinden mislukt'); toast(e.message || String(e)); }
+    }
+  }
+
+  function disconnect() {
+    wantConnected = false;
+    if (device && device.gatt.connected) device.gatt.disconnect();
+    cmdChar = null;
+    setConn('off', 'Niet verbonden');
+  }
+
+  async function onDisconnected() {
+    cmdChar = null;
+    if (!wantConnected) { setConn('off', 'Niet verbonden'); return; }
+    for (let i = 1; i <= 10 && wantConnected; i++) {
+      setConn('busy', 'Verbinding kwijt, opnieuw proberen (' + i + '/10)…');
+      await new Promise(r => setTimeout(r, 2000));
+      try { await openGatt(); return; } catch {}
+    }
+    if (wantConnected) { wantConnected = false; setConn('off', 'Verbinding verbroken'); }
+  }
+
+  function send(cmd) {
+    if (!cmdChar) { toast('Niet verbonden met de ESP32'); return; }
+    const c = cmdChar;
+    writeChain = writeChain.then(() => c.writeValue(new TextEncoder().encode(cmd)))
+      .then(() => { if (cmd !== 'STATUS') toast('Verstuurd: ' + cmd); })
+      .catch(e => toast('Versturen mislukt: ' + (e.message || e)));
+  }
+
+  /* keep the screen on while riding */
+  let wakeLock = null;
+  async function keepAwake() {
+    try { if ('wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } } catch {}
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && (wantConnected || phoneDemo)) keepAwake(); });
+
+  /* ---------- phone demo ---------- */
+  function setPhoneDemo(on) {
+    phoneDemo = on; $('phoneDemo').checked = on;
+    clearInterval(demoTimer);
+    if (!on) return;
+    keepAwake();
+    demoTimer = setInterval(() => {
+      const t = Date.now();
+      const ph = (t % 20000) / 20000;
+      const kmh = ph < .5 ? ph * 2 * 25 : (1 - ph) * 2 * 25;
+      const period = kmh < 1 ? 3500 : Math.round(1.96 / (kmh / 3.6) * 1000);
+      const c = new Uint8Array(12);
+      c[0] = 0x41; c[1] = 12; c[2] = 0x30; c[3] = period >> 8; c[4] = period & 255; c[8] = Math.round(kmh * .6); c[9] = 20;
+      let x = 0; for (let i = 1; i < 12; i++) if (i !== 6) x ^= c[i]; c[6] = x;
+      onFrame({ dir: 'C2D', b: c, t });
+      const d = new Uint8Array(13); d[1] = Math.floor(t / 4000) % 6; d[9] = 0x32; d[11] = 0x37; d[12] = 0x0E;
+      onFrame({ dir: 'D2C', b: d, t });
+    }, 100);
+  }
+
+  /* ---------- rendering ---------- */
+  let renderQueued = false;
+  function scheduleRender() { if (!renderQueued) { renderQueued = true; requestAnimationFrame(() => { renderQueued = false; renderRide(); }); } }
+
+  function renderRide() {
+    const sp = tel.speed;
+    $('speed').textContent = sp == null ? '0.0' : sp.toFixed(1);
+    const fill = $('speedFill');
+    fill.style.width = Math.min(100, (sp || 0) / 30 * 100) + '%';
+    fill.classList.toggle('over', (sp || 0) > 25.5);
+
+    $('pas').textContent = tel.pas == null ? '–' : tel.pas;
+    [...$('pips').children].forEach((el, i) => el.classList.toggle('on', tel.pas != null && i < tel.pas));
+
+    $('batt').innerHTML = tel.batt == null ? '–' : tel.batt + '<small>%</small>';
+    const bars = tel.batt == null ? 0 : Math.round(tel.batt / 25);
+    [...$('battBars').children].forEach((el, i) => el.classList.toggle('on', i < bars));
+    $('battBars').classList.toggle('low', tel.batt != null && tel.batt <= 25);
+
+    $('power').innerHTML = tel.power == null ? '–' : Math.round(tel.power) + '<small>W</small>';
+    $('trip').innerHTML = tripKm.toFixed(2) + '<small>km</small>';
+    $('odo').innerHTML = odoKm.toFixed(1) + '<small>km</small>';
+
+    const err = $('err');
+    if (tel.error) { err.hidden = false; err.textContent = 'Foutcode ' + tel.error + ' van de controller'; } else err.hidden = true;
+    $('tech').textContent = 'Wielomlooptijd ' + (tel.period ?? '–') + ' ms · accu ruw ' + (tel.battRaw ?? '–') + ' · controlegetal ' + (tel.csOk == null ? '–' : tel.csOk ? 'klopt' : 'klopt niet');
+  }
+
+  function hex(b) { return Array.from(b, v => v.toString(16).toUpperCase().padStart(2, '0')).join(' '); }
+  function time(t) { const d = new Date(t); return d.toTimeString().slice(0, 8) + '.' + String(d.getMilliseconds()).padStart(3, '0'); }
+  const dirName = d => d === 'C2D' ? 'controller → display' : 'display → controller';
+
+  function renderData() {
+    const now = Date.now();
+    const box = $('streams');
+    if (!streams.size) { box.innerHTML = '<div class="empty">Nog geen berichten ontvangen.</div>'; $('log').textContent = '–'; return; }
+    let html = '';
+    for (const s of streams.values()) {
+      html += '<div class="stream"><div class="title">' + dirName(s.dir) + ', ' + s.len + ' bytes, ' + s.count + ' berichten</div><div class="bytes">';
+      for (let i = 0; i < s.len; i++) {
+        const hot = s.changedAt[i] && now - s.changedAt[i] < 1500;
+        html += '<div class="byte' + (hot ? ' hot' : '') + '"><div class="i">B' + i + '</div><div class="h">' + s.last[i].toString(16).toUpperCase().padStart(2, '0') + '</div><div class="d">' + s.last[i] + '</div><div class="c">Δ' + s.changes[i] + '</div></div>';
+      }
+      html += '</div></div>';
+    }
+    box.innerHTML = html;
+    $('log').textContent = log.slice(-30).reverse().map(f => (f.dir === 'C2D' ? 'C→D ' : 'D→C ') + String(f.b.length).padStart(2) + ': ' + hex(f.b)).join('\n');
+  }
+
+  setInterval(() => {
+    const stale = !lastFrameMs || Date.now() - lastFrameMs > 3000;
+    const n = $('staleNotice');
+    n.hidden = !stale;
+    if (stale && lastFrameMs) n.textContent = 'Geen data van de fiets in de laatste 3 seconden.';
+    if (currentView === 'data') renderData();
+  }, 300);
+
+  /* ---------- views (hash routing) ---------- */
+  const VIEWS = ['rijden', 'data', 'instellingen'];
+  let currentView = 'rijden';
+  function showView() {
+    const h = location.hash.slice(1);
+    currentView = VIEWS.includes(h) ? h : 'rijden';
+    VIEWS.forEach(v => $('view-' + v).classList.toggle('active', v === currentView));
+    document.querySelectorAll('nav.tabs a').forEach(a => { if (a.dataset.view === currentView) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+    if (currentView === 'data') renderData();
+    window.scrollTo(0, 0);
+  }
+  window.addEventListener('hashchange', showView);
+
+  /* ---------- UI wiring ---------- */
+  let toastTimer;
+  function toast(msg) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 2200); }
+
+  $('connBtn').addEventListener('click', () => (device && (wantConnected || device.gatt.connected)) ? disconnect() : connect());
+  $('resetTrip').addEventListener('click', () => { tripKm = 0; renderRide(); });
+  $('phoneDemo').addEventListener('change', e => setPhoneDemo(e.target.checked));
+  document.querySelectorAll('[data-cmd]').forEach(b => b.addEventListener('click', () => send(b.dataset.cmd)));
+
+  $('clearData').addEventListener('click', () => { streams.clear(); log.length = 0; renderData(); });
+  $('copyLog').addEventListener('click', async () => {
+    const txt = log.map(f => time(f.t) + ' ' + f.dir + ' ' + f.b.length + ': ' + hex(f.b)).join('\n');
+    if (!txt) { toast('Nog niets om te kopiëren'); return; }
+    try { await navigator.clipboard.writeText(txt); toast(log.length + ' berichten gekopieerd'); }
+    catch { $('logTxt').value = txt; $('logDlg').showModal(); $('logTxt').select(); }
+  });
+  $('logClose').addEventListener('click', () => $('logDlg').close());
+
+  // settings fields
+  const numFields = ['ctrlLen','speedHi','speedLo','battIdx','battMax','dispLen','pasIdx','pasMask'];
+  const selFields = ['ctrlDir','speedMode','dispDir'];
+  function fillSettings() {
+    $('wheel').value = cfg.wheel;
+    $('odoIn').value = odoKm.toFixed(1);
+    numFields.forEach(k => $(k).value = cfg[k]);
+    selFields.forEach(k => $(k).value = cfg[k]);
+    document.querySelectorAll('[data-dec]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.dec === cfg.decoder)));
+    $('customBox').hidden = cfg.decoder !== 'CUSTOM';
+  }
+  function saveCfg() { store.set('ouxi-cfg', cfg); }
+  $('wheel').addEventListener('change', e => { const v = parseFloat(e.target.value); if (v > 0.5 && v < 4) { cfg.wheel = v; saveCfg(); toast('Wielomtrek opgeslagen'); } });
+  numFields.forEach(k => $(k).addEventListener('change', e => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) { cfg[k] = v; saveCfg(); } }));
+  selFields.forEach(k => $(k).addEventListener('change', e => { cfg[k] = e.target.value; saveCfg(); }));
+  document.querySelectorAll('[data-dec]').forEach(b => b.addEventListener('click', () => { cfg.decoder = b.dataset.dec; saveCfg(); fillSettings(); }));
+  $('odoSave').addEventListener('click', () => {
+    const v = parseFloat($('odoIn').value);
+    if (isNaN(v) || v < 0) { toast('Vul een kilometerstand in'); return; }
+    odoKm = v; lastSavedOdo = v; store.set('ouxi-odo', v); renderRide(); toast('Kilometerstand opgeslagen');
+  });
+
+  if (!('bluetooth' in navigator)) showBtNotice('Bluetooth werkt niet in deze weergave. Open de link van deze pagina in Chrome op Android. De telefoon-demo onder Instellingen werkt wel.');
+  fillSettings();
+  showView();
+  renderRide();
+})();
+</script>
+</body>
+</html>
