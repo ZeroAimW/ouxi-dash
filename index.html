@@ -173,7 +173,13 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
     <h2>Ruwe data</h2>
     <p class="help">Elke kaart is één soort bericht. Oranje bytes zijn net veranderd. Verander één ding aan de fiets (PAS, wiel draaien, licht) en kijk welke byte meebeweegt.</p>
     <div class="actions">
-      <button class="btn small" id="copyLog">Log kopiëren</button>
+      <input id="markText" placeholder="Wat doe je nu? (bv. PAS omhoog)" style="flex:1;min-width:170px;font:inherit;font-size:15px;padding:6px 12px;border-radius:999px;border:1.5px solid var(--line);background:var(--surface);color:var(--ink)">
+      <button class="btn small primary" id="markBtn">Markering zetten</button>
+    </div>
+    <div class="actions">
+      <button class="btn small" id="copyChanges">Log kopiëren (alleen veranderingen)</button>
+      <button class="btn small" id="copyLog">Log kopiëren (alles)</button>
+      <button class="btn small" id="downloadLog">Log downloaden</button>
       <button class="btn small" id="clearData">Wissen</button>
     </div>
     <div id="streams"><div class="empty">Nog geen berichten ontvangen.</div></div>
@@ -183,6 +189,7 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
 
   <!-- INSTELLINGEN -->
   <section class="view" id="view-instellingen" aria-label="Instellingen">
+    <p class="help" id="ver"></p>
     <h2>Testen</h2>
     <p class="help">Telefoon-demo maakt nepdata in deze pagina (geen ESP32 nodig). ESP32-demo laat de ESP32 nepdata sturen via Bluetooth.</p>
     <label class="switch"><input type="checkbox" id="phoneDemo"> Telefoon-demo</label>
@@ -255,6 +262,7 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
   const CMD = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
   const DATA = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
   const $ = id => document.getElementById(id);
+  const VERSION = 'v0.8 (6 nov 2026)';
 
   /* ---------- storage (per browser) ---------- */
   const store = {
@@ -527,7 +535,7 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
       html += '</div></div>';
     }
     box.innerHTML = html;
-    $('log').textContent = log.slice(-30).reverse().map(f => (f.bad ? '✗ ' : '  ') + (f.dir === 'C2D' ? 'C→D ' : 'D→C ') + String(f.b.length).padStart(2) + ': ' + hex(f.b)).join('\n');
+    $('log').textContent = log.slice(-30).reverse().map(f => f.mark ? '── MARKERING ' + f.n + (f.text ? ': ' + f.text : '') + ' ──' : (f.bad ? '✗ ' : '  ') + (f.dir === 'C2D' ? 'C→D ' : 'D→C ') + String(f.b.length).padStart(2) + ': ' + hex(f.b)).join('\n');
   }
 
   setInterval(() => {
@@ -560,13 +568,60 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
   $('phoneDemo').addEventListener('change', e => setPhoneDemo(e.target.checked));
   document.querySelectorAll('[data-cmd]').forEach(b => b.addEventListener('click', () => send(b.dataset.cmd)));
 
-  $('clearData').addEventListener('click', () => { streams.clear(); log.length = 0; good.C2D = good.D2C = bad.C2D = bad.D2C = 0; renderData(); });
-  $('copyLog').addEventListener('click', async () => {
-    const txt = log.map(f => time(f.t) + ' ' + f.dir + (f.bad ? ' VERMINKT ' : ' ') + f.b.length + ': ' + hex(f.b)).join('\n');
-    if (!txt) { toast('Nog niets om te kopiëren'); return; }
-    try { await navigator.clipboard.writeText(txt); toast(log.length + ' berichten gekopieerd'); }
+  $('clearData').addEventListener('click', () => { streams.clear(); log.length = 0; markN = 0; good.C2D = good.D2C = bad.C2D = bad.D2C = 0; renderData(); });
+
+  /* Log export: header with version + settings, markers, optional changes-only view */
+  let markN = 0;
+  function addMark() {
+    markN++;
+    const text = $('markText').value.trim();
+    log.push({ mark: true, n: markN, text, t: Date.now() }); if (log.length > 3000) log.shift();
+    $('markText').value = '';
+    toast('Markering ' + markN + ' gezet');
+    renderData();
+  }
+  $('markBtn').addEventListener('click', addMark);
+  $('markText').addEventListener('keydown', e => { if (e.key === 'Enter') addMark(); });
+
+  function logText(changesOnly) {
+    const head = [
+      'Ouxi Dash ' + VERSION + ' · decoder ' + cfg.decoder + ' · wielomtrek ' + cfg.wheel + ' m',
+      'ESP32: ' + (espStatus || 'geen status'),
+      jnSeen ? 'Verminkt: C2D ' + bad.C2D + ' van ' + (good.C2D + bad.C2D) + ', D2C ' + bad.D2C + ' van ' + (good.D2C + bad.D2C) : '',
+      changesOnly ? 'Alleen veranderingen (herhalingen en verminkte berichten weggelaten)' : 'Alle berichten',
+    ].filter(Boolean);
+    const last = {}; let skippedBad = 0; const lines = [];
+    for (const f of log) {
+      if (f.mark) { lines.push(time(f.t) + ' ── MARKERING ' + f.n + (f.text ? ': ' + f.text : '') + ' ──'); continue; }
+      const h = hex(f.b);
+      if (changesOnly) {
+        if (f.bad) { skippedBad++; continue; }
+        const k = f.dir + f.b.length;
+        if (last[k] === h) continue;
+        last[k] = h;
+      }
+      lines.push(time(f.t) + ' ' + f.dir + (f.bad ? ' VERMINKT ' : ' ') + f.b.length + ': ' + h);
+    }
+    if (changesOnly && skippedBad) lines.push('(' + skippedBad + ' verminkte berichten weggelaten)');
+    return { txt: head.join('\n') + '\n\n' + lines.join('\n'), n: lines.length };
+  }
+  async function copyLog(changesOnly) {
+    if (!log.length) { toast('Nog niets om te kopiëren'); return; }
+    const { txt, n } = logText(changesOnly);
+    try { await navigator.clipboard.writeText(txt); toast(n + ' regels gekopieerd'); }
     catch { $('logTxt').value = txt; $('logDlg').showModal(); $('logTxt').select(); }
+  }
+  $('copyChanges').addEventListener('click', () => copyLog(true));
+  $('downloadLog').addEventListener('click', () => {
+    if (!log.length) { toast('Nog niets om te downloaden'); return; }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([logText(false).txt], { type: 'text/plain' }));
+    a.download = 'ouxi-log-' + new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '') + '.txt';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    toast('Log gedownload');
   });
+  $('copyLog').addEventListener('click', () => copyLog(false));
   $('logClose').addEventListener('click', () => $('logDlg').close());
 
   // settings fields
@@ -602,6 +657,7 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
   } else {
     $('btDiag').textContent = 'Web Bluetooth: aanwezig';
   }
+  $('ver').textContent = 'Ouxi Dash ' + VERSION;
   fillSettings();
   showView();
   renderRide();
