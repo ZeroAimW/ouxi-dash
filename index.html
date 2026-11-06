@@ -303,10 +303,10 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
     if (!isJN(b) || !xorOk(b)) return t;
     if (b.length === 14) {
       const period = (b[8] << 8) | b[9];
-      return Object.assign({}, t, { proto: 'Jinghui', speed: periodToKmh(period, cfg.wheel), speedT: f.t, period, csOk: true });
+      return Object.assign({}, t, { proto: 'Jinghui', speed: periodToKmh(period, cfg.wheel), speedT: f.t, period, brake: (b[4] & 0x20) !== 0, csOk: true });
     }
-    // PAS byte not found yet (B3 is not it): left empty until confirmed
-    return Object.assign({}, t, { proto: 'Jinghui', limit: b[12], cs2Ok: true });
+    // PAS confirmed on the bike: B4 = PAS level × 3 (0, 3, 6, 9, 12, 15 for PAS 0–5)
+    return Object.assign({}, t, { proto: 'Jinghui', pas: Math.max(0, Math.min(5, Math.round(b[4] / 3))), pasRaw: b[4], limit: b[12], cs2Ok: true });
   }
 
   function decodeCustom(f, t) {
@@ -501,7 +501,7 @@ dialog textarea{width:100%;height:50vh;font-family:ui-monospace,Consolas,monospa
     const err = $('err');
     if (tel.error) { err.hidden = false; err.textContent = 'Foutcode ' + tel.error + ' van de controller'; } else err.hidden = true;
     const cs = v => v == null ? '–' : v ? 'klopt' : 'klopt niet';
-    $('tech').textContent = 'Protocol ' + (tel.proto || (tel.battRaw != null ? 'KT' : '–')) + ' · wielomlooptijd ' + (tel.period ?? '–') + ' ms · limiet ' + (tel.limit != null ? tel.limit + ' km/u' : '–') + ' · controlegetal ' + cs(tel.csOk) + (tel.cs2Ok != null ? ' / ' + cs(tel.cs2Ok) : '');
+    $('tech').textContent = 'Protocol ' + (tel.proto || (tel.battRaw != null ? 'KT' : '–')) + ' · wielomlooptijd ' + (tel.period ?? '–') + ' ms · limiet ' + (tel.limit != null ? tel.limit + ' km/u' : '–') + (tel.brake != null ? ' · B4-bit (rem?) ' + (tel.brake ? 'AAN' : 'uit') : '') + ' · controlegetal ' + cs(tel.csOk) + (tel.cs2Ok != null ? ' / ' + cs(tel.cs2Ok) : '');
   }
 
   function hex(b) { return Array.from(b, v => v.toString(16).toUpperCase().padStart(2, '0')).join(' '); }
